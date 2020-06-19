@@ -1,0 +1,158 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE)
+library(modeest)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+shooting_data <- read.csv("data/shootings-2018.csv", stringsAsFactors = FALSE)
+```
+
+# Analysis of 2018 US Shooting Data
+
+## Summary
+```{r summary_analysis, echo=FALSE}
+total_shootings <- nrow(shooting_data)
+total_lives_lost <- sum(shooting_data$num_killed)
+
+most_impacted_city <- shooting_data %>%
+  group_by(city) %>%
+  summarise(total_impact = sum(num_killed + num_injured)) %>%
+  filter(total_impact == max(total_impact)) %>%
+  pull(city)
+
+people_impacted <- shooting_data %>%
+  group_by(city) %>%
+  summarise(total_impact = sum(num_killed + num_injured)) %>%
+  filter(total_impact == max(total_impact)) %>%
+  pull(total_impact)
+
+most_shootings_one_day <- shooting_data %>%
+  group_by(date) %>%
+  summarise(shootings = n()) %>%
+  filter(shootings == max(shootings)) %>%
+  select(shootings)
+
+most_shootings <- most_shootings_one_day[[1, 1]]
+
+```
+
+Based on the *shootings-2018.csv* dataset, there were `r total_shootings` shootings in the US in 2018. In all of these shootings, a total of `r total_lives_lost` lives were lost. The city that was most impacted was `r most_impacted_city`, having the most people injured and killed in 2018 as a result of shootings (`r people_impacted` total injured/killed). In the US overall, there as an average of `r round(total_shootings/365, 2)` shootings per day, with the highest number of shootings in a day being `r most_shootings`.
+
+```{r summary_table, echo=FALSE, results='asis'}
+month_summary <- shooting_data %>%
+  mutate(
+    date_format = as.Date(date, "%B %d, %Y"),
+    month = format(date_format, "%B")
+  ) %>%
+  group_by(month) %>%
+  summarize(
+    number_shootings = n(),
+    number_killed = sum(num_killed),
+    number_injured = sum(num_injured),
+    most_common_state = mfv1(state)
+  ) %>%
+  arrange(-number_shootings)
+
+colnames(month_summary) <- c(
+  "Month",
+  "Number of Shootings",
+  "Number Killed",
+  "Number Injured",
+  "Most Common State"
+)
+
+kable(month_summary, caption = "Summary of shooting data grouped by month and arranged by number of shootings")
+```
+
+Above is a summary of the 2018 US Shooting Data, grouped by month and sorted by the number of shootings per month. The number of shootings was highest during the summer months (June-August), with June having the highest number of shootings, with 51 shootings. The number of shootings was lowest during the winter months (November-February), with February having the lowest number of shootings, with 14 shootings. California and Illinois together both were the most frequent state for shootings for the year, with both states being the most common state for shootings for 4 months. Chicago was the most frequent state for shootings for the year, with the city being the most common city for 4 months. 
+
+## The Deadliest High School Shooting in History
+```{r select_shooting, echo=FALSE}
+obs_most_impact <- shooting_data %>%
+  mutate(total_impact = num_killed + num_injured) %>%
+  select(city, state, date, total_impact) %>%
+  filter(total_impact == max(total_impact))
+
+date_most_impact <- pull(obs_most_impact, date)
+city_most_impact <- pull(obs_most_impact, city)
+state_most_impact <- pull(obs_most_impact, state)
+num_most_impact <- pull(obs_most_impact, total_impact)
+
+```
+
+The most impactful shooting (largest number of individuals injured/killed) of 2018 occured on `r date_most_impact` in `r city_most_impact`, `r state_most_impact`, with `r num_most_impact` individuals injured or killed total. This shooting, known publicly as the Parkland shooting, occured at Marjory Stoneman Douglas High School, and became the deadliest high school shooting in US history. The gunman, a former student, was responsible for the deaths of 17 students and the injuries of 17 more. Following the shooting, many Parkland students came together and founded an advocacy group lobbying for legislative action on gun violence, reigniting the national conversation on the need for gun control. For more information, read [CNN's article published on the 2-year anniversary of the shooting](https://www.cnn.com/2020/02/14/us/parkland-shooting-marjory-stoneman-douglas-2-years/index.html). 
+
+### Interactive Map of US Shootings
+```{r interactive_map, echo=FALSE}
+shootings_map_data <- shooting_data %>%
+  mutate(shooting_location = paste0(city, ", ", state)) %>%
+  select(
+    lat,
+    long,
+    date,
+    shooting_location,
+    num_killed
+  )
+
+shootings_map <- leaflet(shootings_map_data) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    lat = ~lat,
+    lng = ~long,
+    popup = paste(
+      "Date:", shootings_map_data$date, "<br>",
+      "Location:", shootings_map_data$shooting_location, "<br>",
+      "Casualties:", shootings_map_data$num_killed
+    ),
+    color = "red",
+    stroke = FALSE,
+    radius = 2 + shootings_map_data$num_killed,
+    fillOpacity = 0.4
+  )
+
+shootings_map
+```
+
+The above widget is an interactive map of all the shootings in the US in 2018. Using a map allows for a geographical comparison of the number of shootings as well as the scale of these shootings, showing relative differences between various regions of the US as well as individual states. Clicking on the location markers reveals a tooltip of information on the event, specifically the date, location, and death count of the shooting. The size of these markers directly correlates with the number of casualties, with more deadly shootings having markers with larger radiuses. 
+
+This visual reveals a couple of insights. First of all, a majority of the shootings in 2018 occured in the Eastern regions of the United States, showing almost 10 times more shootings than the Western regions. Another insight shows that a majority of the shootings were smaller scale, resulting in 1 or 2 casualties, whereas larger scale shootings of more than 5 casualties were rare. 
+
+## Comparison of States in Number of Shootings
+``` {r bar_graph, echo=FALSE}
+shootings_by_state <- shooting_data %>%
+  group_by(state) %>%
+  summarise(num_shootings = n()) %>%
+  arrange(-num_shootings) %>%
+  top_n(10, num_shootings)
+
+shootings_by_state$state <- reorder(shootings_by_state$state,
+                                    shootings_by_state$num_shootings)
+
+state_shootings_bar_graph <- ggplot(
+  shootings_by_state,
+  aes(
+    num_shootings,
+    state
+  )
+) +
+  geom_col(aes(
+    group = 1,
+    fill = num_shootings,
+    text = paste("Number of Shootings: ", num_shootings)
+  )) +
+  labs(
+    y = "US States",
+    x = "Number of Shootings",
+    title = "Top 10 US States by Number of Shootings"
+  ) + 
+  scale_fill_continuous(name = "Number of Shootings")
+
+ggplotly(state_shootings_bar_graph, tooltip = "text")
+
+```
+
+The chart above answers the question of which states had the highest number of shootings in 2018 by ranking the ten states with the most shootings in the US in 2018. Hovering over the columns reveals a tooltip displaying the number of shootings for that country. The gradient of blue to black color correlates with the number of shootings, with a greater number of shootings having a light blue color. The chart is specifically a column chart, which allows for easy relative comparison of the different states, with the color gradient making size differences even easier to observe. 
+
+This chart reveals a couple of insights. As observed on the map, a majority of the states with the most shootings are in the Eastern region of the UNited States, with the only exception being California. In addition, the two leading countries in shootings, California and Illinois, have almost 3 times the number of shootings then the lower end of the top 10 countries, showing a significant difference that may be impacted by a number of social factors not investigated in this report.
